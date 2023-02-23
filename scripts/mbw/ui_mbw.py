@@ -27,6 +27,8 @@ def on_ui_tabs():
                     btn_do_merge_block_weighted = gr.Button(value="Run Merge", variant="primary")
                     btn_clear_weight = gr.Button(value="Clear values")
                     btn_reload_checkpoint_mbw = gr.Button(value="Reload checkpoint")
+                with gr.Row():
+                    btn_explode = gr.Button(value="GO NUTS", variant="primary")
             with gr.Column():
                 dd_preset_weight = gr.Dropdown(label="Preset Weights", choices=presetWeights.get_preset_name_list())
                 txt_block_weight = gr.Text(label="Weight values", placeholder="Put weight sets. float number x 25")
@@ -95,33 +97,9 @@ def on_ui_tabs():
         sl_OUT_00, sl_OUT_01, sl_OUT_02, sl_OUT_03, sl_OUT_04, sl_OUT_05,
         sl_OUT_06, sl_OUT_07, sl_OUT_08, sl_OUT_09, sl_OUT_10, sl_OUT_11]
 
-    # Events
-    def onclick_btn_do_merge_block_weighted(
-        model_A, model_B,
-        sl_IN_00, sl_IN_01, sl_IN_02, sl_IN_03, sl_IN_04, sl_IN_05,
-        sl_IN_06, sl_IN_07, sl_IN_08, sl_IN_09, sl_IN_10, sl_IN_11,
-        sl_M_00,
-        sl_OUT_00, sl_OUT_01, sl_OUT_02, sl_OUT_03, sl_OUT_04, sl_OUT_05,
-        sl_OUT_06, sl_OUT_07, sl_OUT_08, sl_OUT_09, sl_OUT_10, sl_OUT_11,
-        txt_model_O, sl_base_alpha, chk_verbose_mbw, chk_allow_overwrite,
-        chk_save_as_safetensors, chk_save_as_half,
-        radio_position_ids
-    ):
-
-        # debug output
-        print( "#### Merge Block Weighted ####")
-
-        _weights = ",".join(
-            [str(x) for x in [
-                sl_IN_00, sl_IN_01, sl_IN_02, sl_IN_03, sl_IN_04, sl_IN_05,
-                sl_IN_06, sl_IN_07, sl_IN_08, sl_IN_09, sl_IN_10, sl_IN_11,
-                sl_M_00,
-                sl_OUT_00, sl_OUT_01, sl_OUT_02, sl_OUT_03, sl_OUT_04, sl_OUT_05,
-                sl_OUT_06, sl_OUT_07, sl_OUT_08, sl_OUT_09, sl_OUT_10, sl_OUT_11
-            ]])
-        #
+    def validate_file(model_A, model_B, txt_model_O, chk_allow_overwrite, chk_save_as_safetensors, chk_save_as_half):
         if not model_A or not model_B:
-            return gr.update(value=f"ERROR: model not found. [{model_A}][{model_B}]")
+            return False, f"ERROR: model not found. [{model_A}][{model_B}]"
 
         #
         # Prepare params before run merge
@@ -159,30 +137,18 @@ def on_ui_tabs():
 
         if not chk_allow_overwrite:
             if os.path.exists(_output):
-                _err_msg = f"ERROR: output_file already exists. overwrite not allowed. abort."
-                print(_err_msg)
-                return gr.update(value=f"{_err_msg} [{_output}]")
-        print(f"  model_0    : {model_A}")
-        print(f"  model_1    : {model_B}")
-        print(f"  base_alpha : {sl_base_alpha}")
-        print(f"  output_file: {_output}")
-        print(f"  weights    : {_weights}")
-        print(f"  skip ids   : {radio_position_ids} : 0:None, 1:Skip, 2:Reset")
+                return False, f"ERROR: output_file already exists. overwrite not allowed. abort."
 
-        result, ret_message = merge(weights=_weights, model_0=model_A, model_1=model_B, allow_overwrite=chk_allow_overwrite,
-            base_alpha=sl_base_alpha, output_file=_output, verbose=chk_verbose_mbw,
-            save_as_safetensors=chk_save_as_safetensors,
-            save_as_half=chk_save_as_half,
-            skip_position_ids=radio_position_ids
-            )
+        return True, model_O, _output
 
+    def on_result(result, ret_message, model_A, model_B, model_O, sl_base_alpha, weights, output):
         if result:
             ret_html = "merged.<br>" \
                 + f"{model_A}<br>" \
                 + f"{model_B}<br>" \
                 + f"{model_O}<br>" \
                 + f"base_alpha={sl_base_alpha}<br>" \
-                + f"Weight_values={_weights}<br>"
+                + f"Weight_values={weights}<br>"
             print("merged.")
         else:
             ret_html = ret_message
@@ -192,11 +158,11 @@ def on_ui_tabs():
         sd_models.list_models()
         model_A_info = sd_models.get_closet_checkpoint_match(model_A)
         model_B_info = sd_models.get_closet_checkpoint_match(model_B)
-        model_O_info = sd_models.get_closet_checkpoint_match(os.path.basename(_output))
+        model_O_info = sd_models.get_closet_checkpoint_match(os.path.basename(output))
         if hasattr(model_O_info, "sha256") and model_O_info.sha256 is None:
             model_O_info:CheckpointInfo = model_O_info
             model_O_info.sha256 = hashes.sha256(model_O_info.filename, "checkpoint/" + model_O_info.title)
-        _names = presetWeights.find_names_by_weight(_weights)
+        _names = presetWeights.find_names_by_weight(weights)
         if _names and len(_names) > 0:
             weight_name = _names[0]
         else:
@@ -217,12 +183,114 @@ def on_ui_tabs():
                 model_O_info.hash,
                 model_sha256(model_O_info),
                 sl_base_alpha,
-                _weights,
+                weights,
                 "",
                 weight_name
                 )
+        return ret_html
+
+    # Events
+    def onclick_btn_do_merge_block_weighted(
+        model_A, model_B,
+        sl_IN_00, sl_IN_01, sl_IN_02, sl_IN_03, sl_IN_04, sl_IN_05,
+        sl_IN_06, sl_IN_07, sl_IN_08, sl_IN_09, sl_IN_10, sl_IN_11,
+        sl_M_00,
+        sl_OUT_00, sl_OUT_01, sl_OUT_02, sl_OUT_03, sl_OUT_04, sl_OUT_05,
+        sl_OUT_06, sl_OUT_07, sl_OUT_08, sl_OUT_09, sl_OUT_10, sl_OUT_11,
+        txt_model_O, sl_base_alpha, chk_verbose_mbw, chk_allow_overwrite,
+        chk_save_as_safetensors, chk_save_as_half,
+        radio_position_ids
+    ):
+
+        # debug output
+        print( "#### Merge Block Weighted ####")
+
+        _weights = ",".join(
+            [str(x) for x in [
+                sl_IN_00, sl_IN_01, sl_IN_02, sl_IN_03, sl_IN_04, sl_IN_05,
+                sl_IN_06, sl_IN_07, sl_IN_08, sl_IN_09, sl_IN_10, sl_IN_11,
+                sl_M_00,
+                sl_OUT_00, sl_OUT_01, sl_OUT_02, sl_OUT_03, sl_OUT_04, sl_OUT_05,
+                sl_OUT_06, sl_OUT_07, sl_OUT_08, sl_OUT_09, sl_OUT_10, sl_OUT_11
+            ]])
+        #
+
+        success, r1, r2 = validate_file(model_A, model_B, txt_model_O, chk_allow_overwrite, chk_save_as_safetensors, chk_save_as_half)
+        if not success:
+            return gr.update(value=r1)
+
+        model_O = r1
+        _output = r2
+
+        print(f"  model_0    : {model_A}")
+        print(f"  model_1    : {model_B}")
+        print(f"  base_alpha : {sl_base_alpha}")
+        print(f"  output_file: {_output}")
+        print(f"  weights    : {_weights}")
+        print(f"  skip ids   : {radio_position_ids} : 0:None, 1:Skip, 2:Reset")
+
+        result, ret_message = merge(weights=_weights, model_0=model_A, model_1=model_B, allow_overwrite=chk_allow_overwrite,
+            base_alpha=sl_base_alpha, output_file=_output, verbose=chk_verbose_mbw,
+            save_as_safetensors=chk_save_as_safetensors,
+            save_as_half=chk_save_as_half,
+            skip_position_ids=radio_position_ids
+            )
+
+        ret_html = on_result(result, ret_message, model_A, model_B, model_O, sl_base_alpha, _weights, _output)
+        return gr.update(value=f"{ret_html}")
+
+    def onclick_btn_explode(
+        model_A, model_B,
+        txt_model_O, sl_base_alpha, chk_verbose_mbw, chk_allow_overwrite,
+        chk_save_as_safetensors, chk_save_as_half, radio_position_ids):
+
+        def _make_weights(i):
+
+            _weights = []
+            for j in range(25):
+                _weight = 1 if j == i else 0
+                _weights.append(str(_weight))
+
+            return ",".join(_weights)
+
+        def _make_suffix(i):
+            if i == 12:
+                return "M00"
+            elif i < 12:
+                return f"IN{str(i).zfill(2)}"
+            else:
+                return f"OUT{str(i-13).zfill(2)}"
+
+        _params = []
+        _filename_list = []
+        for i in range(25):
+            _weights = _make_weights(i)
+            _suffix = _make_suffix(i)
+            _txt_model_O = f"{txt_model_O}-{_suffix}"
+            print(f"{i} -> {_suffix}, {_weights}")
+
+            success, r1, r2 = validate_file(model_A, model_B, _txt_model_O, chk_allow_overwrite, chk_save_as_safetensors, chk_save_as_half)
+            if not success:
+                return gr.update(value=r1)
+            _params.append([_weights, r1, r2])
+            _filename_list.append(r1)
+
+        ret_html = ""
+        for _weights, model_O, _output in _params:
+            result, ret_message = merge(weights=_weights, model_0=model_A, model_1=model_B, allow_overwrite=chk_allow_overwrite,
+                base_alpha=sl_base_alpha, output_file=_output, verbose=chk_verbose_mbw,
+                save_as_safetensors=chk_save_as_safetensors,
+                save_as_half=chk_save_as_half,
+                skip_position_ids=radio_position_ids
+                )
+
+            ret_html += on_result(result, ret_message, model_A, model_B, model_O, sl_base_alpha, _weights, _output)
+
+        _xygrid_value = ",".join(_filename_list)
+        ret_html += f"x/y grid value: {_xygrid_value}<br/>"
 
         return gr.update(value=f"{ret_html}")
+
     btn_do_merge_block_weighted.click(
         fn=onclick_btn_do_merge_block_weighted,
         inputs=[model_A, model_B]
@@ -242,6 +310,14 @@ def on_ui_tabs():
             sl_OUT_00, sl_OUT_01, sl_OUT_02, sl_OUT_03, sl_OUT_04, sl_OUT_05,
             sl_OUT_06, sl_OUT_07, sl_OUT_08, sl_OUT_09, sl_OUT_10, sl_OUT_11,
         ]
+    )
+
+    btn_explode.click(
+        fn=onclick_btn_explode,
+        inputs=[model_A, model_B]
+            + [txt_model_O, sl_base_alpha, chk_verbose_mbw, chk_allow_overwrite]
+            + [chk_save_as_safetensors, chk_save_as_half, radio_position_ids],
+        outputs=[html_output_block_weight_info]
     )
 
     def on_change_dd_preset_weight(dd_preset_weight):
